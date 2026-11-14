@@ -1,0 +1,35 @@
+{
+  "name": "pi-secretary",
+  "version": "0.1.0",
+  "description": "Pi extension: Secretary/Router identity injection, role registry, and role-based external worker dispatch",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "secretary",
+    "router",
+    "dispatch",
+    "roles"
+  ],
+  "license": "MIT",
+  "private": false,
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "changelogPath": "./CHANGELOG.md"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "bun test test/"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
