@@ -20,7 +20,7 @@
 真正的实现却在一处都不在这四份文件里（在 `.pi/extensions/secretary.ts`）。
 重做时如果继续沿用这个布局，同一件事会被写第四遍。
 
-## 文件清单（5 份）
+## 文件清单（6 份）
 
 ### 1. `hpcsharp-compiler/tools/workflow-secretary`（114 行，sh）
 
@@ -127,6 +127,28 @@ open objectives、任务状态/冻结决定、未处置告警四段、软租约/
 
 **归宿**：这不是扩展代码，属于「压缩摘要策略」——重做时更像 billion-context 的配置/提示，
 而不是 secretary 扩展的资产。
+
+### 6. `hpcsharp-compiler/.pi/agents/watchdog.md`（81 行）
+
+**作用**：WF-002 Watchdog 的项目角色片段——`pi --append-system-prompt <该文件>` 起一个只读
+常驻监督会话（observe-only：不改代码、不改 Backlog、不派工、不指挥 Worker；异常按四段报告经
+intercom 报 Router）。
+
+**为什么退役（2026-11-14，用户决定重做）**：
+- 它原本是 `pi-herdr-agents` 的角色定义，带 frontmatter `system-prompt: append` /
+  `persistent: true` / `auto-exit: false` / `spawning: false` / `tools: read,grep,find,ls,bash,intercom`；
+  该扩展本机 2026-11-11 已移除，frontmatter 全部失效 → 只能改写成「注释块里贴手工启动命令」。
+- 那段手工命令本身是脆弱面：`herdr pane get` → 找/建 `subagents` tab → `pane split` →
+  `pane run "pi --append-system-prompt …"`，四步全靠 jq 拼，任何 herdr CLI 变化都会静默失效。
+- 只读边界实际只靠「启动时传只读工具集 + 正文纪律」，正文自己都写明「不是安全边界」。
+
+**重做时值得留下的**：三态证据等级（终态/过程/连接）、「reconnect 只认 Backlog / handoff / git，
+不认旧压缩块」、双 Watchdog 禁令、以及 Watchdog ≠ Worker（不能走 `external_worker`，
+pane 里有 agent 所以 tab 不会被自动回收）这条通道区分。
+
+**归宿**：应该做成「角色注册表里的只读角色 + 机器强制只读」，而不是一份需要人手贴命令的
+markdown。当前 `pi-secretary` 的 `roles/` 只覆盖派工角色（researcher/reviewer/oracle/planner/worker），
+没有常驻监督角色——这是重做的空白项。
 
 ## 这几份文件共同暴露的结构问题（重做时要正解）
 
