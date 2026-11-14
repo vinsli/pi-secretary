@@ -141,7 +141,10 @@ open objectives、任务状态/冻结决定、未处置告警四段、软租约/
    真正不可替代，其余都能用 settings 或扩展 API 表达。
 5. **一份文件选了不落 git 的存储**（projects-memory），直接导致无法审计。
 
-## 一个重要事实：pi-secretary 包里没有任何替代品
+## 一个重要事实：这几份 prose 至今没有等价物
+
+（2026-11-14 更新：`pi-secretary` 已发 0.1.0 并安装；下表「包里有没有替代」一栏随之更新，
+原来的「包里没有替代品」已部分不成立——身份正文已随包分发，其余仍缺。）
 
 这几份文件之所以要归档而不是直接删，是因为 `pi-secretary` 目前只有**代码**
 （`index.ts` + `roles/`：注册表、resolve、roster、worktree、dispatcher、5 份角色正文），
@@ -149,8 +152,8 @@ open objectives、任务状态/冻结决定、未处置告警四段、软租约/
 
 | 旧资产 | 包里有没有替代 | 现状 |
 |---|---|---|
-| `workflow-secretary.prompt.md`（身份正文） | ❌ | 包内 `index.ts` 的 `BODY_RELATIVE_PATH` **仍然读宿主仓** `tools/workflow-secretary.prompt.md`——这是那条「包依赖宿主仓布局」的反向依赖，重做时要优先修 |
-| `workflow-secretary`（启动器） | ❌ | 无 `--tools` 激活、无 `-thu.` 预检 |
+| `workflow-secretary.prompt.md`（身份正文） | ✅ 部分 | 包内 `body/identity.md` 是重写版（去掉了启动器/skill 路径引用，补了派工工具说明）；仓库根可用 `.pi/secretary-identity.md` 覆盖。旧版只作为对照 |
+| `workflow-secretary`（启动器） | ❌ | 无 `--tools` 激活（靠 `defaultTools` 或 `--tools` 手工开）、无 `-thu.` 预检 |
 | `.agents/skills/secretary/SKILL.md`（前台协议） | ❌ | status/reconnect 协议无处承接 |
 | `worker-item-dispatch`（子项制派工纪律） | ❌ | 粒度阈值/滚雪球教训/验收三件无处承接 |
 
@@ -160,11 +163,14 @@ open objectives、任务状态/冻结决定、未处置告警四段、软租约/
 
 | 旧文件想做的事 | 今天由谁做 | 是否够用 |
 |---|---|---|
-| 身份注入 | `.pi/extensions/secretary.ts` 的 `/secretary on` → `before_agent_start` 写 `sections.secretary` | 够用。但正文文件路径仍指向 `tools/workflow-secretary.prompt.md`（已随本次归档移除），`/secretary on` 现在会**诚实降级为 off** 并报「无法读取身份正文」—— 这是设计好的失败路径，不是 bug |
+| 身份注入 | `pi-secretary` 包的 `/secretary on` → `before_agent_start` 写 `sections.secretary`，正文取包内 `body/identity.md` | 够用（反向依赖已修）。本仓 `.pi/extensions/secretary.ts` 已删除，实现只有包这一份 |
 | 5 个 runtime 工具激活 | 无（启动器已移除）；可用 `.pi/settings.json` 的 `defaultTools` 或扩展内 `setActiveTools()` | **待重做** |
 | `-thu.` backlog 预检 | 无 | **待重做**（建议做成 `/secretary doctor`） |
 | 前台协议（status / reconnect） | `tdd-workflow` 里保留了一部分；专属条款随本归档下线 | **待重做** |
 | 子项制派工纪律 | `tdd-workflow` 的「派工通道」+ `dispatch_role` 工具面 | 部分够用 |
 
-重做的主线在 `pi-secretary` 包的 `index.ts` + `roles/`（角色注册表、`dispatch_role`、`dispatcher` 轴），
-那份是**代码**，只有这几份是**已退役的历史 prose / shell**。
+重做的主线在 `pi-secretary` 包（`index.ts` + `body/` + `roles/`），那份是**代码**；
+这里几份是**已退役的历史 prose / shell**，只作对照。
+
+分发与安装：`git:github.com/vinsli/pi-secretary@main`，包内 README 有安装、正文优先级、
+注册表覆盖格式与测试说明。
