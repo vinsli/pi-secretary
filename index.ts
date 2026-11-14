@@ -38,6 +38,7 @@ import { candidatesFor, describeLaunch, readRoleBody, resolveRole } from "./role
 import { appendRosterRecord, buildRosterRecord, findRepoRoot } from "./roles/roster";
 import { DISPATCHER_KINDS, normalizeDispatcher } from "./roles/dispatcher";
 import { assertWritableTarget } from "./roles/worktree";
+import { type GateOutcome, type GateRequest, type TddAction, TddGateError, createTddGate, defaultTddDeps } from "./lib/tdd";
 
 /** 扩展自有 section 的 key（systemPromptOptions.sections 的 tag 名）。 */
 const SECTION_KEY = "secretary";
@@ -399,6 +400,11 @@ export default function secretaryExtension(pi: ExtensionAPI): void {
 				taskId: { type: "string" },
 				item: { type: "string" },
 				brief: { type: "string", description: "What the role should actually do this time (free text)" },
+				cwd: {
+					type: "string",
+					description:
+						"Directory the worker runs in (defaults to the caller's repo root). Write roles must point at an isolated git worktree: pass the worktree path here, or dispatch is rejected.",
+				},
 				dispatcher: {
 					type: ["string", "object"],
 					description:
@@ -419,6 +425,9 @@ export default function secretaryExtension(pi: ExtensionAPI): void {
 			const loaded = loadRoleOverrides(repoRoot);
 			// 调用方轴与角色正交：dispatcher 只影响台账归属，不影响选谁、用什么参数。
 			const dispatcher = normalizeDispatcher(params.dispatcher, ctx?.sessionManager?.getSessionId?.());
+			// 目标目录与调用方目录分开：主会话在主工作树上，写角色只能进隔离 worktree。
+			// 不传 cwd 时行为与以前一致（就在调用方仓库根），由闸门拒绝写角色。
+			const targetRoot = params.cwd ? findRepoRoot(path.resolve(params.cwd)) : repoRoot;
 			const launch = resolveRole(
 				{
 					role: params.role,
@@ -427,12 +436,13 @@ export default function secretaryExtension(pi: ExtensionAPI): void {
 					brief: params.brief,
 					candidateIndex: params.candidateIndex,
 				},
-				{ promptRoot, cwd: repoRoot, overrides: loaded.overrides },
+				{ promptRoot, cwd: targetRoot, overrides: loaded.overrides },
 			);
 			const summary = describeLaunch(launch);
 			// 写角色只允许在隔离 worktree 里动手：这是一道机器闸门，不是 prompt 约束。
+			// 判的是**目标**目录（worker 实际改文件的地方），不是调用方所在仓库。
 			try {
-				assertWritableTarget(repoRoot, launch.permissions.write);
+				assertWritableTarget(targetRoot, launch.permissions.write);
 			} catch (error) {
 				return roleFailure(error instanceof Error ? error.message : String(error), {
 					summary,
@@ -515,6 +525,96 @@ export default function secretaryExtension(pi: ExtensionAPI): void {
 				readWith: { action: "read", pane },
 			};
 		}),
+	});
+
+	// ---- Backlog 内 TDD 门禁（THU-119.3 / S3 ----
+	// red / green / verify 自己跑命令、自己写目标 task 的 Notes、自己按三条口径拒绝。
+	// 证据只落 Notes 单行条目 + `.handoff/<task>-tdd-*.log` 指针：不建 `.tdd` 目录，
+	// 不写父任务，不勾 AC。判定逻辑全在 lib/tdd.ts（纯函数 + 注入依赖），这里只做
+	// 参数校验与错误封装。
+	const tddGate = createTddGate(defaultTddDeps);
+
+	const tddParameters = (needsCommand: boolean) => ({
+		type: "object",
+		properties: {
+			task: { type: "string", description: "Target Backlog task id, e.g. THU-119.3 (evidence is written to its Implementation Notes)." },
+			...(needsCommand
+				? {
+						cmd: {
+							type: "string",
+							description:
+								"The exact test command for this selection set; red and green must use the same command to share a sel.",
+						},
+					}
+				: {}),
+			role: { type: "string", description: "Optional role tag recorded in the entry (worker | reviewer | …)." },
+			timeoutMs: { type: "number", description: "Command timeout in ms (default 600000)." },
+		},
+		required: needsCommand ? ["task", "cmd"] : ["task"],
+		additionalProperties: false,
+	});
+
+	/** verify 不需要命令：它审的是已经写下来的证据链。 */
+	const tddTool = (action: TddAction, needsCommand: boolean) =>
+		roleTool((params: any, ctx: any) => {
+			if (typeof params.task !== "string" || params.task.trim().length === 0) {
+				throw new TypeError("task must be a non-empty string");
+			}
+			if (params.timeoutMs !== undefined && (typeof params.timeoutMs !== "number" || !Number.isFinite(params.timeoutMs))) {
+				throw new RangeError("timeoutMs must be finite");
+			}
+			const request: GateRequest = {
+				task: params.task.trim(),
+				...(needsCommand ? { cmd: params.cmd } : {}),
+				cwd: findRepoRoot(ctx?.cwd ?? process.cwd()),
+				...(params.role ? { role: String(params.role) } : {}),
+				...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}),
+			};
+			let outcome: GateOutcome;
+			try {
+				outcome = action === "tdd-red" ? tddGate.red(request) : action === "tdd-green" ? tddGate.green(request) : tddGate.verify(request);
+			} catch (error) {
+				if (error instanceof TddGateError) return roleFailure(error.message, { kind: error.kind, ...error.details });
+				throw error;
+			}
+			if (!outcome.ok) {
+				// 拒绝也是结构化结果：调用方要能按 kind 分支，而不是靠正则读文本。
+				return roleFailure(outcome.failure?.message ?? `${action} was rejected`, {
+					kind: outcome.failure?.kind ?? null,
+					sel: outcome.sel,
+					exit: outcome.exit,
+					logPath: outcome.logPath ?? null,
+					...outcome.failure?.details,
+				});
+			}
+			return outcome;
+		});
+
+	pi.registerTool({
+		name: "tdd_red",
+		label: "TDD red",
+		description:
+			"Run the test command and, only if it FAILS, append one evidence line to the task's Implementation Notes (cmd, exit, selection-set sel, failure signature, log pointer). A passing command is rejected as red_passed and writes nothing.",
+		parameters: tddParameters(true),
+		execute: tddTool("tdd-red", true),
+	});
+
+	pi.registerTool({
+		name: "tdd_green",
+		label: "TDD green",
+		description:
+			"Record green for this selection set: rejected unless an earlier tdd_red with the same sel exists; then the command must pass. Writes one evidence line with the selection set, HEAD and a worktree snapshot.",
+		parameters: tddParameters(true),
+		execute: tddTool("tdd-green", true),
+	});
+
+	pi.registerTool({
+		name: "tdd_verify",
+		label: "TDD verify",
+		description:
+			"Audit the recorded red→green chain without running anything: rejects green before its red, a green sel that never appeared in a red, and production edits made after green. Names which of the three fired.",
+		parameters: tddParameters(false),
+		execute: tddTool("tdd-verify", false),
 	});
 
 	// 状态只存于本闭包：每个加载本扩展的进程（主会话 / 子代理）各自独立，

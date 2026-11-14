@@ -1,7 +1,7 @@
 {
   "name": "pi-secretary",
-  "version": "0.1.0",
-  "description": "Pi extension: Secretary/Router identity injection, role registry, and role-based external worker dispatch",
+  "version": "0.2.0",
+  "description": "Pi extension: Secretary/Router identity injection, role registry, role-based worker dispatch, and a Backlog-backed TDD gate",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -27,9 +27,13 @@
     }
   },
   "scripts": {
-    "test": "bun test test/"
+    "test": "bun test test/",
+    "tdd": "bun lib/cli.ts"
   },
   "engines": {
     "node": ">=22"
+  },
+  "bin": {
+    "pi-secretary-tdd": "./lib/cli.ts"
   }
 }

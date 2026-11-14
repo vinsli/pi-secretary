@@ -23,8 +23,33 @@
 3. **自己验证**：改完必须跑能证伪它的检查（测试 / 构建 / 复现脚本）。跑不起来就说清卡在哪，不要声称通过。
 4. **不留半成品**：要么完整可用，要么明确报告未完成的部分和原因。
 
+## TDD 门禁（机器闸门，不是建议）
+
+生产代码之前必须有一条**真的失败过**的测试。门禁自己跑命令、自己写目标 task 的
+Implementation Notes；顺序错了会被直接拒绝，不是靠自觉：
+
+```bash
+# 1) 红：命令必须失败，否则被拒为 red_passed（不写 Notes）
+pi-secretary-tdd red    --task <TASK-ID> --role worker --cmd "<同一条测试命令>"
+# 2) 绿：先判「存在同选择集的更早 red」，再跑命令；通过才写 Notes
+pi-secretary-tdd green  --task <TASK-ID> --role worker --cmd "<同一条测试命令>"
+# 3) 复核：不跑命令，只审已写下的 red→green 链
+pi-secretary-tdd verify --task <TASK-ID> --role worker
+```
+
+- 三条拒绝：`green_before_red`（绿早于红，后来补的红不能追认）、`selection_mismatch`
+  （green 的选择集没在任何更早 red 里出现过）、`production_changed_after_green`
+  （绿之后生产代码又有未记录改动）。退出码 0 通过 / 1 被拒 / 2 用法或环境错。
+- `red` 与 `green` 必须用**同一条命令**（同一个选择集），否则 sel 不同，green 被拒。
+- 证据只落两处：目标 task 的 Notes 单行条目 + `.handoff/<task>-tdd-*.log`。
+  不建 `.tdd` 目录，不勾 AC，不写父任务。
+- 包内路径：`bun <pi-secretary>/lib/cli.ts`（任务书里会给绝对路径）；Pi 侧同名工具是
+  `tdd_red` / `tdd_green` / `tdd_verify`。
+
 ## 纪律
 
 - 严禁为了让检查变绿而放宽断言、加豁免、吞异常——那是掩盖问题。
+- 严禁跳过 red 直接写生产代码，或先改代码再补一条「假装失败」的记录——门禁与
+  `git diff` 路径差集会拒绝，review 还会复核断言是否真的验证了需求。
 - 发现任务描述本身有问题（范围错、前提不成立），先停下说明，不要自己改需求。
 - 报告时给出：改了哪些文件（路径）、为什么这么改、跑了什么验证、结果如何。

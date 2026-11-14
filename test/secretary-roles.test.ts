@@ -614,6 +614,55 @@ describe("secretary role tools", () => {
 		expect(existsSync(join(repo, ROSTER_RELATIVE_PATH))).toBe(false);
 	});
 
+	/** 隔离 worktree：`.git` 是文件，`gitdir:` 指向存在的目录。 */
+	function makeIsolatedTree(): string {
+		const repo = makeTmpRepo();
+		const gitdir = join(repo, ".git-worktrees/w-dispatch");
+		mkdirSync(gitdir, { recursive: true });
+		writeFileSync(join(repo, ".git"), `gitdir: ${gitdir}\n`, "utf8");
+		return repo;
+	}
+
+	test("dispatch can target an isolated worktree via cwd while the caller stays on the main tree", async () => {
+		// 调用方（Team Lead 会话）在主工作树上；写角色只能进隔离 worktree。闸门判的是
+		// **目标**目录，所以 dispatch_role 的 cwd 必须能把两者分开。
+		const caller = makeTmpRepo();
+		mkdirSync(join(caller, ".git"));
+		const linked = makeIsolatedTree();
+		const res = await tools.get("dispatch_role")!.execute(
+			"id",
+			{ role: "worker", taskId: "THU-119.3", cwd: linked },
+			undefined,
+			undefined,
+			makeCtx(caller, () => ({
+				toolCall: { type: "toolCall", id: "id/1", name: "external_worker", arguments: {} },
+				result: { content: [{ type: "text", text: "pane: w-7" }], details: { pane: "w-7", promptStarted: true } },
+				isError: false,
+			})),
+		);
+		expect(res.isError).toBeUndefined();
+		expect(calls[0].params).toMatchObject({ kind: "codely", model: "codely-core", cwd: linked });
+		expect(calls[0].params.task).toContain(linked);
+		// 台账仍写调用方的仓库根：派工归属不随目标目录漂移。
+		expect(res.details.rosterPath).toBe(join(caller, ROSTER_RELATIVE_PATH));
+	});
+
+	test("dispatch with cwd still refuses when the target is the main worktree", async () => {
+		const caller = makeTmpRepo();
+		const main = makeTmpRepo();
+		mkdirSync(join(main, ".git"));
+		const res = await tools.get("dispatch_role")!.execute(
+			"id",
+			{ role: "worker", taskId: "THU-119.3", cwd: main },
+			undefined,
+			undefined,
+			makeCtx(caller, () => ({})),
+		);
+		expect(res.isError).toBe(true);
+		expect(res.details.error).toContain("needs an isolated git worktree");
+		expect(calls).toHaveLength(0);
+	});
+
 	test("invalid dispatch params fail before any launch", async () => {
 		const repo = makeTmpRepo();
 		const res = await tools.get("dispatch_role")!.execute(
