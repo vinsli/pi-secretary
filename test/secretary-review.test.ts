@@ -9,8 +9,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { ROLE_REGISTRY, RoleRegistryError, type RolePermissions, validateRegistry } from "../roles/registry";
 import {
 	type RangeDiff,
@@ -235,6 +236,20 @@ describe("task id and SDD path safety", () => {
 		expect(isReviewerWritablePath(ROOT, "THU-119.4", join(ROOT, "lib/review.ts"))).toBe(false);
 		expect(isReviewerWritablePath(ROOT, "THU-119.4", reviewPaths(ROOT, "THU-1").reportFile)).toBe(false);
 	});
+
+	test("rejects an SDD task directory symlink that points outside the repository", () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-review-root-"));
+		const outside = mkdtempSync(join(tmpdir(), "pi-review-outside-"));
+		try {
+			const sddParent = join(root, ".backlog-workflow", "sdd");
+			mkdirSync(sddParent, { recursive: true });
+			symlinkSync(outside, join(sddParent, "THU-119.4"));
+			expect(() => assertSddPath(root, "THU-119.4", reviewPaths(root, "THU-119.4").reportFile)).toThrow(/outside/);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
 });
 
 // ------------------------------------------------------------------ package
@@ -327,8 +342,9 @@ describe("verdict values", () => {
 		expect(parseVerdictValue("unverified")).toBe("cannot_verify");
 	});
 
-	test("unknown values are not silently accepted", () => {
+	test("unknown or contradictory values are not silently accepted", () => {
 		expect(parseVerdictValue("looks fine")).toBeUndefined();
+		expect(parseVerdictValue("✅ compliant | ❌ issues | ⚠️ cannot verify")).toBeUndefined();
 		expect(parseVerdictValue("")).toBeUndefined();
 	});
 });

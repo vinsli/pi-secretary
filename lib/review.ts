@@ -18,7 +18,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertBacklogVersion, type TddEntry, parseTddEntries } from "./tdd";
 
@@ -161,15 +161,44 @@ export function reviewPaths(root: string, task: string): ReviewPaths {
 	};
 }
 
+/** 找到 candidate 的真实路径；不存在的尾部保留为 lexical suffix。 */
+function physicalPath(candidate: string): string | null {
+	let probe = resolve(candidate);
+	const missing: string[] = [];
+	while (!existsSync(probe)) {
+		const parent = dirname(probe);
+		if (parent === probe) return null;
+		missing.unshift(probe.slice(parent.length + 1));
+		probe = parent;
+	}
+	try {
+		return missing.length > 0 ? join(realpathSync(probe), ...missing) : realpathSync(probe);
+	} catch {
+		return null;
+	}
+}
+
 /** 路径必须落在本任务的 SDD 目录内；否则抛 `path_escape`（不做静默回退）。 */
 export function assertSddPath(root: string, task: string, candidate: string): string {
-	const dir = reviewPaths(root, task).dir;
+	const rootPath = resolve(root);
+	const dir = reviewPaths(rootPath, task).dir;
 	const resolved = resolve(candidate);
 	const rel = relative(dir, resolved);
-	if (rel.length === 0 || rel.startsWith("..") || isAbsolute(rel)) {
+	const lexicalEscape = rel.length === 0 || rel.startsWith("..") || isAbsolute(rel);
+	const rootPhysical = physicalPath(rootPath);
+	const dirPhysical = physicalPath(dir);
+	const candidatePhysical = physicalPath(resolved);
+	const physicalEscape =
+		rootPhysical !== null &&
+		dirPhysical !== null &&
+		candidatePhysical !== null &&
+		(relative(rootPhysical, dirPhysical).startsWith("..") || isAbsolute(relative(rootPhysical, dirPhysical)) ||
+			relative(dirPhysical, candidatePhysical).startsWith("..") || isAbsolute(relative(dirPhysical, candidatePhysical)));
+	if (lexicalEscape || physicalEscape) {
 		throw new ReviewGateError("path_escape", `path ${resolved} is outside the SDD dir ${dir}`, {
 			candidate: resolved,
 			dir,
+			...(physicalEscape ? { candidatePhysical, dirPhysical } : {}),
 		});
 	}
 	return resolved;
@@ -190,9 +219,12 @@ export function isReviewerWritablePath(root: string, task: string, candidate: st
 export function parseVerdictValue(raw: string): ReviewVerdict | undefined {
 	const text = (raw ?? "").trim();
 	if (text.length === 0) return undefined;
-	if (text.includes("✅")) return "compliant";
-	if (text.includes("❌")) return "issues";
-	if (text.includes("⚠")) return "cannot_verify";
+	const markers = text.match(/[✅❌⚠]/g) ?? [];
+	if (markers.length > 1) return undefined;
+	if (text === "✅" || /^✅\s*compliant(?:\s|$)/i.test(text)) return "compliant";
+	if (text === "❌" || /^❌\s*issues?(?:\s|$)/i.test(text)) return "issues";
+	if (text === "⚠" || text === "⚠️" || /^⚠️?\s*(?:cannot\s+verify|cannot_verify)(?:\s|$)/i.test(text)) return "cannot_verify";
+	if (markers.length > 0) return undefined;
 	const token = text
 		.toLowerCase()
 		.replace(/[\s-]+/g, "_")
