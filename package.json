@@ -28,12 +28,14 @@
   },
   "scripts": {
     "test": "bun test test/",
-    "tdd": "bun lib/cli.ts"
+    "tdd": "bun lib/cli.ts",
+    "review": "bun lib/review-cli.ts"
   },
   "engines": {
     "node": ">=22"
   },
   "bin": {
-    "pi-secretary-tdd": "./lib/cli.ts"
+    "pi-secretary-tdd": "./lib/cli.ts",
+    "pi-secretary-review": "./lib/review-cli.ts"
   }
 }

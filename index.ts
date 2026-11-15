@@ -39,6 +39,16 @@ import { appendRosterRecord, buildRosterRecord, findRepoRoot } from "./roles/ros
 import { DISPATCHER_KINDS, normalizeDispatcher } from "./roles/dispatcher";
 import { assertWritableTarget } from "./roles/worktree";
 import { type GateOutcome, type GateRequest, type TddAction, TddGateError, createTddGate, defaultTddDeps } from "./lib/tdd";
+import {
+	type ReviewPrepareRequest,
+	type ReviewRecordRequest,
+	type ReviewVerifyRequest,
+	type ReviewPrepareOutcome,
+	type ReviewRecordOutcome,
+	type ReviewVerifyOutcome,
+	createReviewGate,
+	defaultReviewDeps,
+} from "./lib/review";
 
 /** 扩展自有 section 的 key（systemPromptOptions.sections 的 tag 名）。 */
 const SECTION_KEY = "secretary";
@@ -533,6 +543,85 @@ export default function secretaryExtension(pi: ExtensionAPI): void {
 	// 不写父任务，不勾 AC。判定逻辑全在 lib/tdd.ts（纯函数 + 注入依赖），这里只做
 	// 参数校验与错误封装。
 	const tddGate = createTddGate(defaultTddDeps);
+	// review_prepare / review_record / review_verify are deliberately thin Pi
+	// adapters. The pure decision and all filesystem/git/Backlog effects live in
+	// lib/review.ts so the same gate is used by the external CLI and tests.
+	const reviewGate = createReviewGate(defaultReviewDeps);
+	const reviewParameters = (action: "prepare" | "record" | "verify") => ({
+		type: "object",
+		properties: {
+			task: { type: "string", description: "Target Backlog task id; the only writable report path is its own SDD directory." },
+			...(action === "prepare" || action === "verify"
+				? {
+						baseSha: { type: "string", description: "Audited BASE commit SHA." },
+						headSha: { type: "string", description: "Audited HEAD commit SHA." },
+					}
+				: {}),
+			...(action === "record"
+				? { report: { type: "string", description: "Complete reviewer report; it is stored as this task's SDD report.md." } }
+				: {}),
+			...(action === "prepare" ? { constraints: { type: "array", items: { type: "string" } } } : {}),
+		},
+		required: action === "prepare" || action === "verify" ? ["task", "baseSha", "headSha"] : ["task", "report"],
+		additionalProperties: false,
+	});
+
+	const reviewTool = (action: "prepare" | "record" | "verify") =>
+		roleTool((params: any, ctx: any) => {
+			if (typeof params.task !== "string" || params.task.trim().length === 0) throw new TypeError("task must be a non-empty string");
+			const cwd = findRepoRoot(ctx?.cwd ?? process.cwd());
+			const finish = (outcome: ReviewPrepareOutcome | ReviewRecordOutcome | ReviewVerifyOutcome) => {
+				if (outcome.ok) return outcome;
+				return roleFailure(outcome.failure?.message ?? `${action} was rejected`, {
+					kind: outcome.failure?.kind ?? "review_rejected",
+					task: outcome.task,
+					...outcome.failure?.details,
+				});
+			};
+			try {
+				if (action === "prepare") {
+					const request: ReviewPrepareRequest = {
+						task: params.task.trim(),
+						baseSha: String(params.baseSha),
+						headSha: String(params.headSha),
+						cwd,
+						...(Array.isArray(params.constraints) ? { constraints: params.constraints.map(String) } : {}),
+					};
+					return finish(reviewGate.prepare(request) as ReviewPrepareOutcome);
+				}
+				if (action === "record") {
+					const request: ReviewRecordRequest = { task: params.task.trim(), cwd, report: String(params.report ?? "") };
+					return finish(reviewGate.record(request) as ReviewRecordOutcome);
+				}
+				const request: ReviewVerifyRequest = { task: params.task.trim(), baseSha: String(params.baseSha), headSha: String(params.headSha), cwd };
+				return finish(reviewGate.verify(request) as ReviewVerifyOutcome);
+			} catch (error) {
+				if (error instanceof Error) return roleFailure(error.message, { kind: (error as any).kind ?? "review_error", ...(error as any).details });
+				throw error;
+			}
+		});
+
+	pi.registerTool({
+		name: "review_prepare",
+		label: "Review prepare",
+		description: "Create the task SDD review package and diff pointer for an explicit BASE..HEAD range.",
+		parameters: reviewParameters("prepare"),
+		execute: reviewTool("prepare"),
+	});
+	pi.registerTool({
+		name: "review_record",
+		label: "Review record",
+		description: "Record a reviewer report only in the task's own SDD report.md; never writes source or Backlog markdown.",
+		parameters: reviewParameters("record"),
+		execute: reviewTool("record"),
+	});
+	pi.registerTool({
+		name: "review_verify",
+		label: "Review verify",
+		description: "Verify task/BASE/HEAD/package/report and apply the review gate; Minor is recorded, Critical/Important block.",
+		parameters: reviewParameters("verify"),
+		execute: reviewTool("verify"),
+	});
 
 	const tddParameters = (needsCommand: boolean) => ({
 		type: "object",

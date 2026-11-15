@@ -59,6 +59,8 @@ export interface RoleCandidate {
 export interface RolePermissions {
 	/** 是否可以修改仓库文件。只读角色一律 false——codely 靠角色正文约束，codex 靠 -s read-only。 */
 	write: boolean;
+	/** 可写范围：source（worker）、sdd-report（reviewer 的本任务报告）或 none。 */
+	writeScope: "none" | "sdd-report" | "source";
 	/** shared = 与主会话同一工作树（只读角色）；isolated = 必须隔离工作树（可写角色）。 */
 	worktree: "shared" | "isolated";
 	/** 允许执行的命令前缀；只用于拼 prompt 约束，不构成沙箱。 */
@@ -127,6 +129,7 @@ export const ROLE_REGISTRY: Record<RoleId, RoleDefinition> = {
 		fallback: ["launch_failed", "no_output_60s"],
 		permissions: {
 			write: false,
+			writeScope: "none",
 			worktree: "shared",
 			allowedCommands: READ_ONLY_COMMANDS,
 		},
@@ -144,6 +147,7 @@ export const ROLE_REGISTRY: Record<RoleId, RoleDefinition> = {
 		fallback: ["launch_failed", "no_output_60s"],
 		permissions: {
 			write: false,
+			writeScope: "sdd-report",
 			worktree: "shared",
 			allowedCommands: READ_ONLY_COMMANDS,
 		},
@@ -161,6 +165,7 @@ export const ROLE_REGISTRY: Record<RoleId, RoleDefinition> = {
 		fallback: ["launch_failed", "no_output_60s"],
 		permissions: {
 			write: false,
+			writeScope: "none",
 			worktree: "shared",
 			allowedCommands: READ_ONLY_COMMANDS,
 		},
@@ -178,6 +183,7 @@ export const ROLE_REGISTRY: Record<RoleId, RoleDefinition> = {
 		fallback: ["launch_failed", "no_output_60s"],
 		permissions: {
 			write: false,
+			writeScope: "none",
 			worktree: "shared",
 			allowedCommands: READ_ONLY_COMMANDS,
 		},
@@ -195,6 +201,7 @@ export const ROLE_REGISTRY: Record<RoleId, RoleDefinition> = {
 		fallback: ["launch_failed", "no_output_60s", "turn_error"],
 		permissions: {
 			write: true,
+			writeScope: "source",
 			worktree: "isolated",
 			allowedCommands: WRITE_COMMANDS,
 		},
@@ -306,6 +313,24 @@ export function validateRegistry(registry: Record<RoleId, RoleDefinition> = ROLE
 		const permissions = definition.permissions;
 		if (typeof permissions?.write !== "boolean") {
 			throw new RoleRegistryError(`role "${id}" permissions.write must be boolean`);
+		}
+		if (!["none", "sdd-report", "source"].includes(permissions?.writeScope)) {
+			throw new RoleRegistryError(`role "${id}" permissions.writeScope must be none|sdd-report|source`);
+		}
+		if (permissions.writeScope === "source" && !permissions.write) {
+			throw new RoleRegistryError(`role "${id}" writeScope=source requires write=true`);
+		}
+		if (permissions.writeScope === "sdd-report" && permissions.write) {
+			throw new RoleRegistryError(`role "${id}" writeScope=sdd-report requires write=false`);
+		}
+		if (permissions.write && permissions.writeScope !== "source") {
+			throw new RoleRegistryError(`writable role "${id}" must use writeScope=source`);
+		}
+		if (!permissions.write && permissions.writeScope === "source") {
+			throw new RoleRegistryError(`read-only role "${id}" cannot use writeScope=source`);
+		}
+		if (permissions.writeScope === "sdd-report" && permissions.worktree !== "shared") {
+			throw new RoleRegistryError(`report-only role "${id}" must use a shared worktree`);
 		}
 		if (permissions.worktree !== "shared" && permissions.worktree !== "isolated") {
 			throw new RoleRegistryError(`role "${id}" permissions.worktree must be shared|isolated`);

@@ -95,10 +95,28 @@ Notes 条目格式（单行，可 grep）：
 - <ISO ts> tdd-red|tdd-green|tdd-verify | task=<id> role=<role> cmd=<命令> exit=<码> sel=<前12> head=<sha> snap=<sha> | fail=<失败签名> | log=<相对路径>
 ```
 
+## S4 review gate（单 reviewer 闭环）
+
+Review 也走同一套“纯判定 + 薄壳”结构。主 session 用显式 task、`BASE_SHA`、`HEAD_SHA` 生成
+`.backlog-workflow/sdd/<task>/review-package.md`，完整 patch 只写入同目录 `diff.txt`；package
+正文只包含任务 Spec/Plan/AC、约束、diff 文件指针和 TDD 证据指针。reviewer 只能交回自己 task 的
+`report.md`，不能改 source、Backlog markdown 或 AC。
+
+```bash
+pi-secretary-review prepare --task THU-119.4 --base-sha <BASE_SHA> --head-sha <HEAD_SHA>
+pi-secretary-review record  --task THU-119.4 --report-file /tmp/review.md
+pi-secretary-review verify  --task THU-119.4 --base-sha <BASE_SHA> --head-sha <HEAD_SHA>
+```
+
+报告必须同时给出 Spec compliance 与 code quality verdict，并列出 Critical/Important/Minor、Cannot verify
+和已检查的高风险点。verify 会校验 task/BASE/HEAD/package/report；Spec 不合规、无法验证或 Critical/Important
+会拒绝，Minor 只记录到目标 task 的 Notes，不自动勾 AC 或修改父任务。Pi 侧对应工具是
+`review_prepare`、`review_record`、`review_verify`。
+
 ## 开发
 
 ```bash
-bun test test/     # 118 tests / 0 fail，不依赖宿主仓库
+bun test test/     # 164 tests / 0 fail，不依赖宿主仓库
 ```
 
 - `test/secretary.test.ts` —— 命令/事件 mock（注入、去重、生命周期、正文优先级）
@@ -116,7 +134,7 @@ bun test test/     # 118 tests / 0 fail，不依赖宿主仓库
 ```
 index.ts              扩展入口（factory）
 body/identity.md      包内身份正文
-lib/                  runtime（job 队列/catalog/cooldown/deadline）+ tdd.ts（门禁判定）+ cli.ts（外部入口）
+lib/                  runtime（job 队列/catalog/cooldown/deadline）+ tdd.ts/review.ts（门禁判定）+ cli.ts/review-cli.ts（外部入口）
 roles/                角色注册表 / 项目覆盖 / 解析 / roster / worktree 闸门 / 角色提示词
 test/                 单元 + mock + 真实 SDK
 legacy/               已退役资产存档（只读参考）
