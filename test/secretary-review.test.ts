@@ -368,6 +368,25 @@ describe("review report parsing", () => {
 		expect(parsed.report.issues[0]).toMatchObject({ severity: "critical", location: "src/a.ts:10" });
 	});
 
+	test("ignores conventional no-issue markers under severity headings", () => {
+		const parsed = parseReviewReport([
+			"task: THU-119.4",
+			`base: ${BASE_SHORT}`,
+			`head: ${HEAD_SHORT}`,
+			"spec: compliant",
+			"quality: compliant",
+			"## Issues",
+			"### Critical",
+			"- none",
+			"### Important",
+			"- no issues",
+			"### Minor",
+			"- 无",
+		].join("\n"));
+		expect(parsed.ok).toBe(true);
+		if (parsed.ok) expect(parsed.report.issues).toHaveLength(0);
+	});
+
 	test("a report without both verdicts is invalid, not a pass", () => {
 		const parsed = parseReviewReport("task: THU-119.4\nspec: ✅ compliant\n");
 		expect(parsed.ok).toBe(false);

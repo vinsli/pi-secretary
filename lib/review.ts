@@ -237,6 +237,15 @@ export function parseReviewMetadata(raw: string): ReviewPackageMeta {
 	return meta;
 }
 
+function isEmptyIssueMarker(value: string): boolean {
+	const normalized = value
+		.replace(/[\u0060*_]/g, "")
+		.replace(/[.。:：]+$/, "")
+		.trim()
+		.toLowerCase();
+	return ["none", "no issue", "no issues", "n/a", "na", "无", "无问题", "暂无"].includes(normalized);
+}
+
 function parseIssueLine(severity: ReviewSeverity, body: string): ReviewIssue {
 	const locationMatch = /(?:^|[\s`（(])([A-Za-z0-9_./-]+\.[A-Za-z0-9]+):(\d+)(?:-\d+)?/.exec(body);
 	const location = locationMatch ? `${locationMatch[1]}:${locationMatch[2]}` : "";
@@ -281,7 +290,7 @@ function parseSections(raw: string): { issues: ReviewIssue[]; strengths: string[
 		// report has no `## Issues` heading. This is useful for a harness that
 		// emits one-line findings while preserving the same machine-readable shape.
 		if (!bullet) {
-			if (section === "issues" && severity && line.length > 0 && !line.startsWith("#")) {
+			if (section === "issues" && severity && line.length > 0 && !line.startsWith("#") && !isEmptyIssueMarker(line)) {
 				issues.push(parseIssueLine(severity, line));
 			}
 			continue;
@@ -292,13 +301,13 @@ function parseSections(raw: string): { issues: ReviewIssue[]; strengths: string[
 			severity = inlineHeading[1].toLowerCase() as ReviewSeverity;
 			section = "issues";
 			const remainder = content.slice(inlineHeading[0].length).trim();
-			if (remainder) issues.push(parseIssueLine(severity, remainder));
+			if (remainder && !isEmptyIssueMarker(remainder)) issues.push(parseIssueLine(severity, remainder));
 			continue;
 		}
 		const inline = /^(critical|important|minor)\s*[:：]\s*(.*)$/i.exec(content);
 		if (inline) {
 			const inlineSeverity = inline[1].toLowerCase() as ReviewSeverity;
-			issues.push(parseIssueLine(inlineSeverity, inline[2]));
+			if (!isEmptyIssueMarker(inline[2])) issues.push(parseIssueLine(inlineSeverity, inline[2]));
 			continue;
 		}
 		if (section === "strengths") {
@@ -315,7 +324,7 @@ function parseSections(raw: string): { issues: ReviewIssue[]; strengths: string[
 		}
 		if (section !== "issues") continue;
 		const issueSeverity = severity;
-		if (!issueSeverity) continue;
+		if (!issueSeverity || isEmptyIssueMarker(content)) continue;
 		issues.push(parseIssueLine(issueSeverity, inline ? inline[2] : content));
 	}
 	return { issues, strengths, checked, cannotVerify };
